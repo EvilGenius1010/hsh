@@ -13,7 +13,6 @@ fn main(){
 
         std::io::stdin().read_line(&mut input_line) // Read a line from stdin into the `input` string
             .expect("Failed to read line");
-
         let trimmed_input = input_line.trim().to_string();
         let tokens = tokenize_input(&trimmed_input);
         match_expression(tokens)
