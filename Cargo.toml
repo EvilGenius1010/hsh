@@ -1,2 +1,2 @@
 [workspace]
-members = [ "builtin","repl"]
+members = [ "builtin", "core","repl"]

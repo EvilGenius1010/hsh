@@ -1,10 +1,8 @@
 use std::io::Write;
 mod error;
+use core::{TokenizedOutput,match_expression};
 
-struct TokenizedOutput<'a>{
-    command:&'a str,
-    args:Vec<&'a str>
-}
+
 fn main(){
     
     
@@ -36,13 +34,3 @@ fn tokenize_input<'a>(input_line:&'a String)->TokenizedOutput<'a>{
     }
 }
 
-fn match_expression(tokens:TokenizedOutput){
-    match tokens.command {
-        "echo"=>{println!("{}",tokens.args.concat())},
-        "exit"=>{
-            println!("bye");
-            std::process::exit(0);
-        }
-        _ =>{eprintln!("Command not found!")}
-    }
-}
