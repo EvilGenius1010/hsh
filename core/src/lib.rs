@@ -1,5 +1,11 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use crate::fs::syscalls::get_cwd_impl;
 mod tokenizer;
+mod process;
+pub mod error;
+
+
 
 #[cfg(feature = "builtin_access")]
 pub mod fs;
@@ -18,6 +24,16 @@ pub fn match_expression(tokens:TokenizedOutput){
         "exit"=>{
             println!("bye");
             std::process::exit(0);
+        },
+        "pwd"=>{
+            match get_cwd_impl() {
+                Ok(path)=>{
+                    println!("{:?}",path.as_path())
+                },
+                Err(err)=>{
+                    
+                }
+            }
         }
         _ =>{eprintln!("Command not found!")}
     }
