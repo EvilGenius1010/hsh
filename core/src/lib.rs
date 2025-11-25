@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::{ffi::os_str::Display, path::Path};
 
-use crate::fs::syscalls::get_cwd_impl;
+use crate::fs::syscalls::{change_working_dir_impl, get_cwd_impl};
 mod tokenizer;
 mod process;
 pub mod error;
@@ -30,23 +30,43 @@ pub fn match_expression(tokens:TokenizedOutput){
                 Ok(path)=>{
                     println!("{:?}",path.as_path())
                 },
-                Err(err)=>{
+                Err(_err)=>{
                     
                 }
             }
+        },
+        "cd"=>{
+
+            if tokens.args.len()!=1{
+                eprintln!("Invalid Length");
+                return;
+                // return Err(())
+            }
+            // match change_working_dir_impl(tokens.args) {
+            //     Ok(new_path)=>{
+            //      print!("{}",new_path.)
+            // }
+            // }
         }
         _ =>{eprintln!("Command not found!")}
     }
 }
 
-pub fn load_system_variables(){
+pub fn load_startup_path()->String{
     // if hshrc file exists in /etc load variables into memory
-    if Path::new("/etc.txt").exists(){
+    // if not, create the file
 
+    match get_cwd_impl() {
+        Ok(path)=>{
+            path.display().to_string()
+        },
+        Err(err)=>{
+            return err.to_string();
+        }
     }
 
 
-    // if not, create the file
+
 
 
 }

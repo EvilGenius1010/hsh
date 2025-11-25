@@ -1,6 +1,6 @@
 use std::io::Write;
 mod error;
-use core::{TokenizedOutput,match_expression};
+use core::{TokenizedOutput,match_expression, load_startup_path};
 
 
 fn main(){
@@ -8,7 +8,7 @@ fn main(){
     
     loop {
         let mut input_line = String::from("");
-        print!("~$ ");
+        print!("{} % ",load_startup_path());
         std::io::stdout().flush().expect("Failed to flush stdout"); // Flush stdout to ensure prompt is displayed
 
         std::io::stdin().read_line(&mut input_line) // Read a line from stdin into the `input` string

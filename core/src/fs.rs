@@ -5,10 +5,9 @@
 // #[doc(hidden)]  // hides from public docs
 #[cfg(feature = "builtin_access")]
 pub mod syscalls {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
-    use nix::unistd::{self, getcwd};
-    use nix::errno::Errno;
+    use nix::unistd::{getcwd,chdir};
 
     use crate::error::FsError;
 
@@ -16,12 +15,21 @@ pub mod syscalls {
         // println!("get_cwd syscall called!");
         // println!("cwd = {:?}", path);
         
-        let path = unistd::getcwd();
+        let path = getcwd();
         match path {
             Ok(path)=>Ok(path),
             
             Err(errno)=>{
-                Err(FsError::CwdError{errno: errno })
+                Err(FsError::DisplayCwdError {errno: errno })
+            }
+        }
+    }
+
+    pub fn change_working_dir_impl(path:&Path)->Result<(), FsError>{
+        match chdir(path) {
+            Ok(output_path)=>Ok(()),
+            Err(errno)=>{
+                Err(FsError::ChangeCwdError { errno })
             }
         }
     }
@@ -48,7 +56,7 @@ pub mod filesystem_syscallfns_tests{
     pub fn test_error_display() {
         // Create a mock error to test Display output
         let mock_nix_error = NixError::EACCES;
-        let fs_error = FsError::CwdError {
+        let fs_error = FsError::DisplayCwdError {
             errno: NixError::EACCES,
         };
 
@@ -71,7 +79,7 @@ pub mod filesystem_syscallfns_tests{
         use std::error::Error;
 
         let mock_nix_error = NixError::ENOTDIR;
-        let fs_error = FsError::CwdError {
+        let fs_error = FsError::DisplayCwdError {
             errno: NixError::ENOTDIR,
         };
 
