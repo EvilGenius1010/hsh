@@ -6,7 +6,7 @@ mod process;
 pub mod error;
 
 use std::ffi::CString;
-use crate::process::process_impl::{piping_process, IoRedirection};
+use crate::process::process_impl::{redirect_process, IoRedirection};
 
 
 

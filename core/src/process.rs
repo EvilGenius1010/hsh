@@ -2,22 +2,42 @@
 /// syscall and functions implementation for process management.
 pub mod process_impl{
     use std::error::Error;
-    use std::fs::File;
-    use std::os::fd::AsFd;
     use std::path::Path;
     use std::os::fd::OwnedFd;
     use std::ffi::{CString,CStr};
     
-    use nix::fcntl::{OFlag, openat,open};
+    use nix::fcntl::{OFlag, open};
     use nix::sys::stat::Mode;
-    use nix::unistd::{dup2, dup2_raw, dup2_stdin, dup2_stdout, execvp};
+    use nix::unistd::{ dup2_stdin, dup2_stdout, execvp, pipe};
     use nix::{libc::_exit, sys::wait::waitpid, unistd::{ForkResult, execve, fork, write}};
-    
+
+    use crate::tokenizer::ShellTokens;
+
     pub enum IoRedirection{
         InputFromFile,
         OverwriteToFile,
         AppendToFile
     }
+    
+    pub struct ProcessToExec<'a>{
+        
+        /// name of running process
+        process_name:String,
+        
+        /// path of binary of process
+        process_path:&'a Path,
+
+        /// arguments passed to the command
+        process_args:Vec<&'a str>,
+        
+        /// The order in which processes are arranged
+        order:u16
+
+
+    }
+
+
+
     pub fn spawn_new_process(path:&CStr){
         match unsafe {fork()}{
             Ok(ForkResult::Parent { child,..}) =>{
@@ -46,6 +66,82 @@ pub mod process_impl{
         }
 
     }
+
+    pub fn spawn_and_pipe(prev_pipe:Option<OwnedFd>,curr_index:usize,curr_process_item:&ProcessToExec)->Result<Option<OwnedFd>,Box<dyn Error>>{
+        match unsafe{fork()} {
+            Ok(ForkResult::Parent { child })=>{
+                waitpid(child, None);
+                Ok(None)
+            }
+            Ok(ForkResult::Child)=>{
+                let c_string_args:Vec<CString> = curr_process_item.process_args.iter()
+                .map(|s| CString::new(*s).unwrap())
+                .collect();
+                
+                let c_str_args: Vec<&CStr> = c_string_args
+                .iter()
+                .map(|s| s.as_c_str())
+                .collect();
+
+            
+                // match pipe(){
+                //     Ok(pipe_ends)=>{
+                //         let (receive_end_pipe,send_end_pipe) = (pipe_ends.0,pipe_ends.1);
+                //             dup2_stdin(send_end_pipe)?;
+                //         }
+                //         Err(errno)=>{
+                //             println!("{}",errno);
+                            
+                //         }
+                // }
+                let (receive_end_pipe,send_end_pipe) = pipe()?;
+                dup2_stdout(send_end_pipe)?;
+                if curr_index != 0{
+
+                    if let Some(val) = prev_pipe{
+                        dup2_stdin(val)?;
+                    }
+                    // match prev_pipe{
+                    //     Some(val)=>dup2_stdin(val),
+                    //     None => {
+                    //         eprintln!("Error!");
+                    //         Ok(())
+                    //     }
+                        
+                    // }
+                }
+
+
+                
+                    
+
+                execvp(CString::new(curr_process_item.process_path.to_str().expect("Failed to convert Cstring!"))?.as_c_str(),
+                &c_str_args);
+                    
+                Ok(Some(receive_end_pipe))
+            }
+            Err(err)=>{
+                println!("{}",err);
+                Ok(None)
+            }
+        }
+    }
+
+
+    // fn to perform piping
+    pub fn perform_piping(process_list:Vec<ProcessToExec>)->Result<(),Box<dyn Error>>{
+        let process_iterator = process_list.iter();
+
+        let mut prev_pipe:Option<OwnedFd> = None;
+        //use fork to 
+        for (index,item) in process_iterator.enumerate(){
+            let next_pipe = spawn_and_pipe(prev_pipe,index,item)?;
+                prev_pipe = next_pipe;
+        }
+        Ok(())
+    }
+
+
 
     #[derive(Clone)]
     pub enum RedirectionFileType{
@@ -77,7 +173,7 @@ pub fn open_file_for_redirection(
     Ok(fd)
 }
 
-pub fn piping_process(
+pub fn redirect_process(
     file_path: &Path,
     flag: IoRedirection,
     command: &CString,
@@ -154,256 +250,20 @@ mod syscall_tests{
     use std::fs::{File, read_to_string};
     use std::io::Write;
     use tempfile::tempdir;
-    use nix::unistd::dup2_raw;
 
 
 
 
-/* 
-    #[test]
-    fn test_open_file_writeonly() {
-        use process_impl::RedirectionFileType;
-        let dir = tempdir().expect("Failed to create temp dir");
-        let file_path = dir.path().join("output.txt");
 
-        // Test: Open file in WriteOnly mode
-        let fd_result = open_file_for_redirection(
-            &file_path,
-            RedirectionFileType::WriteOnly
-        );
 
-        assert!(fd_result.is_ok(), "Should successfully open file for writing");
-        
-        let fd = fd_result.unwrap();
-        
-        // Verify we can write to the fd
-        let test_data = b"hello world\n";
-        let bytes_written = nix_write(&fd, test_data).expect("Should write to fd");
-        assert_eq!(bytes_written, test_data.len());
-        
-        // Drop fd to close it
-        drop(fd);
-        
-        // Verify the file was created and contains our data
-        let content = read_to_string(&file_path).expect("Should read file");
-        assert_eq!(content, "hello world\n");
-        
-        println!("✓ WriteOnly test passed");
-    }
 
-    #[test]
-    fn test_open_file_writeonly_truncates_existing() {
-        use process_impl::RedirectionFileType;
-        let dir = tempdir().expect("Failed to create temp dir");
-        let file_path = dir.path().join("output.txt");
-
-        // Pre-create file with existing content
-        {
-            let mut f = File::create(&file_path).unwrap();
-            write!(f, "old content that should be truncated").unwrap();
-        }
-
-        // Open with WriteOnly (should truncate)
-        let fd = open_file_for_redirection(
-            &file_path,
-            RedirectionFileType::WriteOnly
-        ).expect("Should open for writing");
-
-        // Write new content
-        let new_data = b"new";
-        nix_write(&fd, new_data).expect("Should write");
-        drop(fd);
-
-        // Verify old content is gone, only new content remains
-        let content = read_to_string(&file_path).unwrap();
-        assert_eq!(content, "new");
-        assert!(!content.contains("old content"));
-        
-        println!("✓ WriteOnly truncate test passed");
-    }
-
-    #[test]
-    fn test_open_file_readonly() {
-        use process_impl::RedirectionFileType;
-        let dir = tempdir().expect("Failed to create temp dir");
-        let file_path = dir.path().join("input.txt");
-
-        // Create a file with content first
-        let test_content = "test input data\n";
-        {
-            let mut f = File::create(&file_path).unwrap();
-            write!(f, "{}", test_content).unwrap();
-        }
-
-        // Test: Open file in ReadOnly mode
-        let fd_result = open_file_for_redirection(
-            &file_path,
-            RedirectionFileType::ReadOnly
-        );
-
-        assert!(fd_result.is_ok(), "Should successfully open file for reading");
-        
-        let fd = fd_result.unwrap();
-        
-        // Verify we can read from the fd
-        let mut buffer = [0u8; 100];
-        let bytes_read = nix_read(&fd, &mut buffer)
-            .expect("Should read from fd");
-        
-        assert_eq!(bytes_read, test_content.len());
-        assert_eq!(&buffer[..bytes_read], test_content.as_bytes());
-        
-        drop(fd);
-        
-        println!("✓ ReadOnly test passed");
-    }
-
-    #[test]
-    fn test_open_file_readonly_nonexistent_fails() {
-
-        let dir = tempdir().expect("Failed to create temp dir");
-        let file_path = dir.path().join("nonexistent.txt");
-
-        // Test: Try to open non-existent file in ReadOnly mode
-        let fd_result = open_file_for_redirection(
-            &file_path,
-            RedirectionFileType::ReadOnly
-        );
-
-        // Should fail because file doesn't exist
-        assert!(fd_result.is_err(), "Should fail to open non-existent file");
-        
-        println!("✓ ReadOnly non-existent file test passed");
-    }
-
-    #[test]
-    fn test_open_file_append() {
-        let dir = tempdir().expect("Failed to create temp dir");
-        let file_path = dir.path().join("output.txt");
-
-        // Create initial file content
-        {
-            let mut f = File::create(&file_path).unwrap();
-            write!(f, "first line\n").unwrap();
-        }
-
-        // Test: Open file in Append mode
-        let fd = open_file_for_redirection(
-            &file_path,
-            RedirectionFileType::Append
-        ).expect("Should open for appending");
-
-        // Write additional data
-        let append_data = b"second line\n";
-        nix_write(&fd, append_data).expect("Should write");
-        drop(fd);
-
-        // Verify both old and new content exist
-        let content = read_to_string(&file_path).unwrap();
-        assert!(content.contains("first line"), "Should contain original content");
-        assert!(content.contains("second line"), "Should contain appended content");
-        assert_eq!(content, "first line\nsecond line\n");
-        
-        println!("✓ Append test passed");
-    }
-
-    #[test]
-    fn test_open_file_append_multiple_times() {
-        let dir = tempdir().expect("Failed to create temp dir");
-        let file_path = dir.path().join("output.txt");
-
-        // Append multiple times
-        for i in 1..=3 {
-            let fd = open_file_for_redirection(
-                &file_path,
-                RedirectionFileType::Append
-            ).expect("Should open for appending");
-
-            let data = format!("line {}\n", i);
-            nix_write(&fd, data.as_bytes()).expect("Should write");
-            drop(fd);
-        }
-
-        // Verify all lines are present in order
-        let content = read_to_string(&file_path).unwrap();
-        assert_eq!(content, "line 1\nline 2\nline 3\n");
-        
-        println!("✓ Multiple append test passed");
-    }
-
-    #[test]
-    fn test_open_file_permissions() {
-        use std::os::unix::fs::PermissionsExt;
-        
-        let dir = tempdir().expect("Failed to create temp dir");
-        let file_path = dir.path().join("output.txt");
-
-        // Create file with WriteOnly
-        let fd = open_file_for_redirection(
-            &file_path,
-            RedirectionFileType::WriteOnly
-        ).expect("Should open for writing");
-        
-        nix_write(&fd, b"test").expect("Should write");
-        drop(fd);
-
-        // Check file permissions (should be 0600 = user read/write only)
-        let metadata = std::fs::metadata(&file_path).unwrap();
-        let permissions = metadata.permissions();
-        let mode = permissions.mode();
-        
-        // Mode includes file type bits, so mask with 0o777 to get permission bits
-        let perm_bits = mode & 0o777;
-        
-        // Should have user read (0o400) and write (0o200) = 0o600
-        assert_eq!(perm_bits, 0o600, "File should have 0600 permissions");
-        
-        println!("✓ Permissions test passed");
-    }
-
-    #[test]
-    fn test_all_redirection_types_summary() {
-        let dir = tempdir().expect("Failed to create temp dir");
-        
-        // Test all three types in sequence
-        let test_cases = vec![
-            (RedirectionFileType::WriteOnly, "write", b"data1\n"),
-            (RedirectionFileType::Append, "append", b"data2\n"),
-            (RedirectionFileType::ReadOnly, "read", b"sSasfd"),
-        ];
-
-        for (redir_type, name, data) in test_cases {
-            let file_path = dir.path().join(format!("{}.txt", name));
-            
-            // For ReadOnly, create file first
-            if matches!(redir_type, RedirectionFileType::ReadOnly) {
-                let mut f = File::create(&file_path).unwrap();
-                write!(f, "readable").unwrap();
-            }
-            
-            let fd_result = open_file_for_redirection(&file_path, redir_type.clone());
-            assert!(fd_result.is_ok(), "{} should succeed", name);
-            
-            let fd = fd_result.unwrap();
-            
-            // Try to write (will only work for Write/Append)
-            if !matches!(redir_type, RedirectionFileType::ReadOnly) {
-                nix_write(&fd, data).expect(&format!("{} should write", name));
-            }
-            
-            drop(fd);
-            println!("✓ {} mode works", name);
-        }
-    }
-
-*/
 
 
     use super::process_impl::*;
     use nix::unistd::{fork, ForkResult};
     use nix::sys::wait::waitpid;
     use std::ffi::CString;
-    use nix::unistd::{dup2_stdout,dup2_stdin};
+    use nix::unistd::dup2_stdout;
 
 #[test]
 fn test_input_from_file_cat() {
@@ -436,7 +296,7 @@ fn test_input_from_file_cat() {
             
             // NOW redirect stdin and run cat
             let command = CString::new("/bin/cat").unwrap();
-            piping_process(
+            redirect_process(
                 &input_path,
                 IoRedirection::InputFromFile,
                 &command,
@@ -471,7 +331,7 @@ fn test_input_from_file_cat() {
                 let command = CString::new("/usr/bin/grep").unwrap();
                 let args = &["hello"];
 
-                piping_process(
+                redirect_process(
                     &input_path,
                     IoRedirection::InputFromFile,
                     &command,
@@ -504,7 +364,7 @@ fn test_input_from_file_cat() {
                 let command = CString::new("/bin/echo").unwrap();
                 let args = &["test", "message"];
 
-                piping_process(
+                redirect_process(
                     &output_path,
                     IoRedirection::OverwriteToFile,
                     &command,
@@ -544,7 +404,7 @@ fn test_input_from_file_cat() {
                 let command = CString::new("/bin/echo").unwrap();
                 let args = &["NEW"];
 
-                piping_process(
+                redirect_process(
                     &output_path,
                     IoRedirection::OverwriteToFile,
                     &command,
@@ -585,7 +445,7 @@ fn test_input_from_file_cat() {
                 let command = CString::new("/bin/echo").unwrap();
                 let args = &["line2"];
 
-                piping_process(
+                redirect_process(
                     &output_path,
                     IoRedirection::AppendToFile,
                     &command,
@@ -616,7 +476,7 @@ fn test_input_from_file_cat() {
                     let arg = format!("line{}", i);
                     let args = &[arg.as_str()];
 
-                    piping_process(
+                    redirect_process(
                         &output_path,
                         IoRedirection::AppendToFile,
                         &command,
@@ -655,7 +515,7 @@ fn test_input_from_file_cat() {
                 let command = CString::new("/bin/ls").unwrap();
                 let args = &["-la"];
 
-                piping_process(
+                redirect_process(
                     &output_path,
                     IoRedirection::OverwriteToFile,
                     &command,
@@ -690,7 +550,7 @@ fn test_input_from_file_cat() {
                 let command = CString::new("/usr/bin/wc").unwrap();
                 let args = &["-l"];
 
-                piping_process(
+                redirect_process(
                     &input_path,
                     IoRedirection::InputFromFile,
                     &command,
