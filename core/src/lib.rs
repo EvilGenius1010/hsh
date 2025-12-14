@@ -1,8 +1,9 @@
-use std::{ffi::os_str::Display, path::Path};
+use std::path::Path;
 
 use crate::fs::syscalls::{change_working_dir_impl, get_cwd_impl};
 mod tokenizer;
 mod process;
+mod parser;
 pub mod error;
 
 use std::ffi::CString;
