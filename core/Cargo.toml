@@ -7,6 +7,7 @@ edition = "2024"
 nix = {version = "0.30.1", features = ["fs","process"]}
 derive_more = {version = "2.0.1", features = ["error","debug","display","from"]}
 tempfile = "3.23.0"
+nom = "8.0.0"
 
 [features]
 builtin_access = []
